@@ -3,6 +3,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,12 @@ import (
 	"github.com/nicolasacchi/chx/internal/client"
 	"github.com/nicolasacchi/chx/internal/config"
 )
+
+// jsonUnmarshalImpl is named to avoid colliding with stdlib `json.Unmarshal` when
+// the file uses both. The wrapper jsonUnmarshal() above forwards here.
+func jsonUnmarshalImpl(b []byte, v any) error {
+	return json.Unmarshal(b, v)
+}
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -240,14 +247,68 @@ var configDoctorCmd = &cobra.Command{
 			probeSQL(creds)
 		}
 
-		// Surface B: defer to Phase 3
-		fmt.Printf("surface_b (Cloud):     %s", okOrNo(creds.HasCloud()))
-		if creds.HasCloud() {
-			fmt.Print(" — probe deferred to Phase 3 (cloud.go)")
+		// Surface B: real Cloud Mgmt API probe (Phase 3)
+		fmt.Printf("surface_b (Cloud):     ")
+		if !creds.HasCloud() {
+			fmt.Println("not configured")
+		} else {
+			probeCloud(creds)
 		}
-		fmt.Println()
 		return nil
 	},
+}
+
+// probeCloud calls GET /v1/organizations and reports the result.
+func probeCloud(creds *config.Credentials) {
+	timeout, err := resolvedTimeout()
+	if err != nil {
+		fmt.Printf("FAIL — bad --timeout: %v\n", err)
+		return
+	}
+	c := client.NewCloudClient(creds.CloudKeyID, creds.CloudKeySecret, creds.CloudOrgID, verboseFlag, timeout)
+	body, err := c.Get(ctx(), "/organizations")
+	if err != nil {
+		if api, ok := err.(*client.APIError); ok {
+			fmt.Printf("FAIL — HTTP %d: %s\n", api.StatusCode, truncate(api.Body, 200))
+			return
+		}
+		fmt.Printf("FAIL — %v\n", err)
+		return
+	}
+	// Parse the {result, requestId, status} envelope and count orgs.
+	var env struct {
+		Result []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	_ = jsonUnmarshal(body, &env)
+	switch len(env.Result) {
+	case 0:
+		fmt.Println("ok — but no organizations accessible (key may be scoped or expired)")
+	case 1:
+		fmt.Printf("ok — org=%s (%s)\n", env.Result[0].Name, env.Result[0].ID)
+	default:
+		names := make([]string, len(env.Result))
+		for i, o := range env.Result {
+			names[i] = fmt.Sprintf("%s (%s)", o.Name, o.ID)
+		}
+		fmt.Printf("ok — %d orgs: %s\n", len(env.Result), strings.Join(names, ", "))
+	}
+}
+
+// jsonUnmarshal is a thin wrapper kept to match the import-light pattern
+// of stx (no json package directly in commands when avoidable).
+func jsonUnmarshal(b []byte, v any) error {
+	return jsonUnmarshalImpl(b, v)
+}
+
+// truncate caps a string at n chars (no ellipsis — for short error bodies).
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // probeSQL runs SELECT 1 with a short timeout. On TCP/TLS failure, fetches the

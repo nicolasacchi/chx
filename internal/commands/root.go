@@ -105,6 +105,8 @@ func init() {
 		metricsCmd, eventsCmd, asyncMetricsCmd,
 		errorsCmd, warningsCmd, settingsCmd,
 		usersCmd, clustersCmd,
+		// Phase 3
+		servicesCmd, apiCmd,
 	)
 
 	// Validation across mutually exclusive flag pairs is handled in PersistentPreRunE on
@@ -144,6 +146,31 @@ func printTimingFooter(s client.CHSummary) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, s.Format())
+}
+
+// getCloudClient resolves credentials and constructs a Cloud Mgmt API client.
+// If autoDiscoverOrg is true and orgID is missing, calls GET /organizations to fill it.
+func getCloudClient(autoDiscoverOrg bool) (*client.CloudClient, *config.Credentials, error) {
+	creds, err := loadCreds()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !creds.HasCloud() {
+		return nil, creds, fmt.Errorf("Cloud Management API not configured: set --cloud-key-id + --cloud-key-secret + --cloud-org-id (or run 'chx config add')")
+	}
+	timeout, err := resolvedTimeout()
+	if err != nil {
+		return nil, creds, err
+	}
+	c := client.NewCloudClient(creds.CloudKeyID, creds.CloudKeySecret, creds.CloudOrgID, verboseFlag, timeout)
+	if c.OrgID() == "" && autoDiscoverOrg {
+		id, derr := c.DiscoverOrg(ctx())
+		if derr != nil {
+			return nil, creds, derr
+		}
+		creds.CloudOrgID = id
+	}
+	return c, creds, nil
 }
 
 // requireYes errors out if --yes wasn't set. Used by `chx sql --write` and any single-gate write.

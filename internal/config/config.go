@@ -58,10 +58,16 @@ type Credentials struct {
 // HasSQL reports whether the SQL endpoint is configured.
 func (c *Credentials) HasSQL() bool { return c.Host != "" && c.SQLUser != "" }
 
-// HasCloud reports whether the Cloud Mgmt API is configured.
+// HasCloud reports whether Cloud Mgmt API credentials (key + secret) are present.
+// The organization ID is optional at this layer — getCloudClient auto-discovers
+// it via GET /organizations when needed and exactly one org is accessible.
 func (c *Credentials) HasCloud() bool {
-	return c.CloudOrgID != "" && c.CloudKeyID != "" && c.CloudKeySecret != ""
+	return c.CloudKeyID != "" && c.CloudKeySecret != ""
 }
+
+// HasCloudOrg reports whether the organization ID is set in addition to creds.
+// Required for any path-scoped Cloud Mgmt API call beyond GET /organizations.
+func (c *Credentials) HasCloudOrg() bool { return c.HasCloud() && c.CloudOrgID != "" }
 
 // Profile is one entry in config.toml under [profiles.<name>].
 type Profile struct {
