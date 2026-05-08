@@ -209,9 +209,10 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 				lastErr = AsRetryable(apiErr, resp.Header)
 				continue
 			}
-			// Try to upgrade 4xx into a CHException with code/name from headers.
+			// Try to upgrade 4xx into a CHException with code/name from headers + body.
 			if chx := exceptionFromHeaders(resp.Header, opts.QueryID); chx != nil {
 				chx.Message = string(body)
+				chx.Name = parseExceptionName(chx.Message)
 				return nil, chx
 			}
 			return nil, apiErr
