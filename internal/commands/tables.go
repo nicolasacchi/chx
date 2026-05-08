@@ -76,7 +76,7 @@ func sqlString(s string) string {
 }
 
 func init() {
-	tablesListCmd.Flags().StringVar(&tablesListDatabase, "database", "", "Filter by database (default: hides system + INFORMATION_SCHEMA)")
+	tablesListCmd.Flags().StringVar(&tablesListDatabase, "in-db", "", "Filter by database (default: hides system + INFORMATION_SCHEMA). Renamed from --database to avoid clashing with the global --database (SQL session default).")
 	tablesListCmd.Flags().StringVar(&tablesListLike, "like", "", "Filter by name LIKE pattern (e.g. '%events%')")
 	tablesCmd.AddCommand(tablesListCmd)
 

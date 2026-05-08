@@ -95,7 +95,17 @@ func init() {
 	pf.BoolVarP(&verboseFlag, "verbose", "v", false, "Log HTTP requests to stderr")
 	pf.StringVar(&protocolFlag, "protocol", "http", "SQL transport: http (default) or native (port 9440)")
 
-	rootCmd.AddCommand(configCmd, sqlCmd, databasesCmd, tablesCmd, columnsCmd)
+	rootCmd.AddCommand(
+		// Phase 0/1
+		configCmd, sqlCmd, databasesCmd, tablesCmd, columnsCmd,
+		// Phase 2
+		partsCmd, mutationsCmd, mergesCmd,
+		replicasCmd, replicationQueueCmd,
+		processesCmd, queriesCmd,
+		metricsCmd, eventsCmd, asyncMetricsCmd,
+		errorsCmd, warningsCmd, settingsCmd,
+		usersCmd, clustersCmd,
+	)
 
 	// Validation across mutually exclusive flag pairs is handled in PersistentPreRunE on
 	// each subcommand (Phase 1+) or by leaf commands as they land.
