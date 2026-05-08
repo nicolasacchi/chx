@@ -2,14 +2,20 @@ package commands
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/nicolasacchi/chx/internal/client"
 	"github.com/nicolasacchi/chx/internal/config"
 )
 
@@ -225,11 +231,120 @@ var configDoctorCmd = &cobra.Command{
 		}
 		fmt.Printf("profile:               %s\n", emptyOrValue(profileFlag, "(default)"))
 		fmt.Printf("host:                  %s:%d\n", emptyOrValue(creds.Host, "(none)"), creds.Port)
-		fmt.Printf("surface_a (SQL):       %s — probe deferred to Phase 1 (sql.go)\n", okOrNo(creds.HasSQL()))
-		fmt.Printf("surface_b (Cloud):     %s — probe deferred to Phase 3 (cloud.go)\n", okOrNo(creds.HasCloud()))
-		fmt.Println("\nPhase 0 stub — full doctor lives behind sql.go + cloud.go landings.")
+
+		// Surface A: SELECT 1
+		fmt.Printf("surface_a (SQL):       ")
+		if !creds.HasSQL() {
+			fmt.Println("not configured")
+		} else {
+			probeSQL(creds)
+		}
+
+		// Surface B: defer to Phase 3
+		fmt.Printf("surface_b (Cloud):     %s", okOrNo(creds.HasCloud()))
+		if creds.HasCloud() {
+			fmt.Print(" — probe deferred to Phase 3 (cloud.go)")
+		}
+		fmt.Println()
 		return nil
 	},
+}
+
+// probeSQL runs SELECT 1 with a short timeout. On TCP/TLS failure, fetches the
+// caller's public IP from api.ipify.org and prints an actionable IP-allowlist hint.
+func probeSQL(creds *config.Credentials) {
+	timeout, err := resolvedTimeout()
+	if err != nil {
+		fmt.Printf("FAIL — bad --timeout: %v\n", err)
+		return
+	}
+	c := client.NewSQLClient(
+		creds.Host, creds.Port, creds.Secure,
+		creds.SQLUser, creds.SQLPass, creds.Database,
+		verboseFlag, timeout,
+	)
+	res, err := c.Query(ctx(), "SELECT 1 AS ok", client.SQLOptions{
+		Format:        "JSON",
+		MaxResultRows: 1,
+	})
+	if err == nil {
+		fmt.Printf("ok — query_id=%s, %d rows in %s\n",
+			res.QueryID, res.Summary.ResultRows,
+			time.Duration(res.Summary.ElapsedNS)*time.Nanosecond)
+		return
+	}
+
+	// Connectivity failure → likely IP allowlist or wrong host
+	if isConnFail(err) {
+		ip := fetchPublicIP(3 * time.Second)
+		fmt.Printf("FAIL — TCP/TLS error: %v\n", err)
+		if ip != "" {
+			fmt.Printf("\n  Your public IP appears to be: %s\n", ip)
+			fmt.Printf("  If the SQL endpoint exists but rejects this IP, add it to the allowlist:\n")
+			fmt.Printf("    chx services allowlist add <service-id> --ip %s/32 --yes  (Phase 3)\n", ip)
+			fmt.Printf("  Or via the ClickHouse Cloud console.\n")
+		}
+		return
+	}
+
+	// SQL-level error (auth, missing grants, etc.)
+	if chx, ok := err.(*client.CHException); ok {
+		fmt.Printf("FAIL — ClickHouse error %d (%s): %s\n", chx.Code, chx.Name, chx.Message)
+		return
+	}
+	if api, ok := err.(*client.APIError); ok {
+		fmt.Printf("FAIL — HTTP %d: %s\n", api.StatusCode, api.Body)
+		return
+	}
+	fmt.Printf("FAIL — %v\n", err)
+}
+
+// isConnFail returns true for network/TLS errors (vs. server-rejected requests).
+func isConnFail(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Wrap unwraps net.OpError, url.Error, etc.
+	for ; err != nil; err = errors.Unwrap(err) {
+		switch err.(type) {
+		case *net.OpError, *net.DNSError:
+			return true
+		}
+		s := err.Error()
+		if strings.Contains(s, "connection refused") ||
+			strings.Contains(s, "no such host") ||
+			strings.Contains(s, "i/o timeout") ||
+			strings.Contains(s, "tls:") ||
+			strings.Contains(s, "TLS handshake") {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchPublicIP calls api.ipify.org with a short timeout and returns the IP string.
+// Returns "" on any failure (best-effort hint, not a blocker).
+func fetchPublicIP(timeout time.Duration) string {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
+	if err != nil {
+		return ""
+	}
+	hc := &http.Client{Timeout: timeout}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func init() {

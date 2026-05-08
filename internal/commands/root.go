@@ -95,10 +95,45 @@ func init() {
 	pf.BoolVarP(&verboseFlag, "verbose", "v", false, "Log HTTP requests to stderr")
 	pf.StringVar(&protocolFlag, "protocol", "http", "SQL transport: http (default) or native (port 9440)")
 
-	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(configCmd, sqlCmd, databasesCmd, tablesCmd, columnsCmd)
 
 	// Validation across mutually exclusive flag pairs is handled in PersistentPreRunE on
 	// each subcommand (Phase 1+) or by leaf commands as they land.
+}
+
+// getSQLClient resolves credentials and constructs a SQL client.
+// Returns the error if neither --host nor a profile provides SQL config.
+func getSQLClient() (*client.SQLClient, *config.Credentials, error) {
+	creds, err := loadCreds()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !creds.HasSQL() {
+		return nil, creds, fmt.Errorf("SQL endpoint not configured: set --host + --user + --password (or run 'chx config add')")
+	}
+	timeout, err := resolvedTimeout()
+	if err != nil {
+		return nil, creds, err
+	}
+	c := client.NewSQLClient(
+		creds.Host,
+		creds.Port,
+		creds.Secure,
+		creds.SQLUser,
+		creds.SQLPass,
+		creds.Database,
+		verboseFlag,
+		timeout,
+	)
+	return c, creds, nil
+}
+
+// printTimingFooter writes the X-ClickHouse-Summary footer to stderr if --timing is set.
+func printTimingFooter(s client.CHSummary) {
+	if !timingFlag {
+		return
+	}
+	fmt.Fprintln(os.Stderr, s.Format())
 }
 
 // requireYes errors out if --yes wasn't set. Used by `chx sql --write` and any single-gate write.
