@@ -82,6 +82,14 @@ chx services get <id>
 chx services start <id> --yes      # polls until state=running
 chx services allowlist add <id> --ip 1.2.3.4/32 --description "office" --yes
 chx services backups list <id>
+chx services backups restore <backup-id> \
+    --name restored-$(date +%F) \
+    --provider aws --region us-east-1 --tier production --yes
+
+# Logical dump (DDL + data) to a local directory
+chx dump --db analytics --output ./backup-$(date +%F)
+chx dump --db analytics --tables 'events_%' --format Parquet --compress gzip --output ./events-dump
+chx dump --db analytics --schema-only --output ./schema
 
 # Generic passthrough for endpoints not yet typed
 chx api GET /organizations
@@ -101,6 +109,17 @@ chx overview --jq 'sections.cloud_state.data.#.{name:name,state:state}'
 | `--jq <gjson>` | filtered output (gjson, NOT real jq) | structured projection |
 | `--ndjson` | `JSONEachRow` raw stream | huge exports; no `--jq` |
 | `--format <X>` | passes through to ClickHouse server | CSV / TSV / Vertical / Pretty / etc |
+
+## Backup & restore
+
+ClickHouse Cloud does **not** expose backup contents for download — `chx services backups list` enumerates platform-managed snapshots, but there is no Cloud API for fetching their bytes. Two practical paths:
+
+| Goal | Command | Notes |
+|---|---|---|
+| Restore a Cloud-side backup into a **new** service | `chx services backups restore <backup-id> --name … --provider … --region … --tier … --yes` | Calls `POST /services` with `backupId`. Creates a fresh service ID, endpoints, and password. Look up provider/region/tier from `chx services get <source-id>` first. |
+| Take a **local logical export** of a database | `chx dump --db <name> --output <dir>` | Iterates `system.tables`, writes `<db>/<table>.sql` (DDL) + `<db>/<table>.<ext>` (data) + a `manifest.json`. Streams via `SQLClient.Stream` so multi-GB tables don't OOM. |
+
+`chx dump` is a logical export — not a point-in-time consistent snapshot. For PIT consistency, rely on Cloud-managed backups + `services backups restore`.
 
 ## Known divergences from sibling CLIs
 

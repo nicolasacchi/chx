@@ -1,9 +1,16 @@
 package client
 
 import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildParams_DefaultReadonly(t *testing.T) {
@@ -173,6 +180,112 @@ func TestNewQueryID_NonEmptyAndUnique(t *testing.T) {
 	}
 	if !strings.HasPrefix(a, "chx-") && len(a) != 32 {
 		t.Errorf("expected 32-hex-char ID or chx- fallback, got %q (len=%d)", a, len(a))
+	}
+}
+
+// newTestSQLClient wires an SQLClient at the given test server URL. The server
+// URL is split into host:port and the scheme determines secure/plain.
+func newTestSQLClient(t *testing.T, srv *httptest.Server) *SQLClient {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	host := u.Hostname()
+	port := 80
+	if p := u.Port(); p != "" {
+		if _, err := url.ParseRequestURI(srv.URL); err == nil {
+			// crude parse — httptest always gives numeric ports
+			var n int
+			for _, r := range p {
+				n = n*10 + int(r-'0')
+			}
+			port = n
+		}
+	}
+	secure := u.Scheme == "https"
+	return NewSQLClient(host, port, secure, "u", "p", "", false, 5*time.Second)
+}
+
+func TestStream_NoBuffering_PlainBody(t *testing.T) {
+	const want = "row1\nrow2\nrow3\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/tab-separated-values")
+		w.Header().Set("X-ClickHouse-Summary", `{"result_rows":"3"}`)
+		w.WriteHeader(200)
+		io.WriteString(w, want)
+	}))
+	defer srv.Close()
+
+	c := newTestSQLClient(t, srv)
+	var buf bytes.Buffer
+	sum, err := c.Stream(context.Background(), "SELECT 1", SQLOptions{Format: "TSV", QueryID: "qid"}, &buf)
+	if err != nil {
+		t.Fatalf("Stream returned error: %v", err)
+	}
+	if buf.String() != want {
+		t.Errorf("body mismatch:\n  got:  %q\n  want: %q", buf.String(), want)
+	}
+	if sum.ResultRows != 3 {
+		t.Errorf("summary.ResultRows: got %d, want 3", sum.ResultRows)
+	}
+}
+
+func TestStream_GzipDecoded(t *testing.T) {
+	const payload = "the quick brown fox jumps over the lazy dog\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Confirm client advertises gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("expected Accept-Encoding: gzip header from client, got %q", r.Header.Get("Accept-Encoding"))
+		}
+		var gzBuf bytes.Buffer
+		gw := gzip.NewWriter(&gzBuf)
+		gw.Write([]byte(payload))
+		gw.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(200)
+		w.Write(gzBuf.Bytes())
+	}))
+	defer srv.Close()
+
+	c := newTestSQLClient(t, srv)
+	var buf bytes.Buffer
+	_, err := c.Stream(context.Background(), "SELECT 1", SQLOptions{Format: "TSV", QueryID: "qid"}, &buf)
+	if err != nil {
+		t.Fatalf("Stream returned error: %v", err)
+	}
+	if buf.String() != payload {
+		t.Errorf("gzip-decoded body mismatch:\n  got:  %q\n  want: %q", buf.String(), payload)
+	}
+}
+
+func TestStream_ErrorStatusReturnsAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-ClickHouse-Exception-Code", "60")
+		w.WriteHeader(404)
+		io.WriteString(w, "Code: 60. DB::Exception: Table x doesn't exist (UNKNOWN_TABLE) (version 24.5.1)")
+	}))
+	defer srv.Close()
+
+	c := newTestSQLClient(t, srv)
+	var buf bytes.Buffer
+	_, err := c.Stream(context.Background(), "SELECT 1", SQLOptions{Format: "TSV", QueryID: "qid"}, &buf)
+	if err == nil {
+		t.Fatalf("expected error for 404, got nil")
+	}
+	if chx, ok := err.(*CHException); ok {
+		if chx.Code != 60 {
+			t.Errorf("CHException.Code: got %d, want 60", chx.Code)
+		}
+		if chx.Name != "UNKNOWN_TABLE" {
+			t.Errorf("CHException.Name: got %q, want UNKNOWN_TABLE", chx.Name)
+		}
+	} else if _, ok := err.(*APIError); !ok {
+		t.Errorf("expected *CHException or *APIError, got %T: %v", err, err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("buf should be empty on error, got %d bytes", buf.Len())
 	}
 }
 

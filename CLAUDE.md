@@ -184,13 +184,30 @@ chx services awake <id> --yes                                   # cold-boot pre-
 chx services allowlist add <id> --ip 1.2.3.4/32 --description X --yes
 chx services allowlist remove <id> --ip 1.2.3.4/32 --yes
 
-chx services backups list <id>                                  # backups for a service
+chx services backups list <id>                                  # list Cloud-managed backups for a service
+chx services backups restore <backup-id> \
+    --name restored-svc --provider aws --region us-east-1 \
+    --tier production --yes                                     # POST /services with backupId → new service
 
 chx api GET /organizations                                      # generic passthrough (absolute path)
 chx api GET services                                            # relative path → /organizations/<org>/services
 chx api PATCH services/<id> --from-file allowlist.json --yes
 chx api POST <path> --data '{"key":"value"}' --yes
 ```
+
+### dump — local logical export
+
+```bash
+chx dump --db analytics --output ./backup-2026-05-12
+chx dump --db analytics --tables 'events_%' --format Parquet --compress gzip --output ./events-dump
+chx dump --db analytics --schema-only --output ./schema
+```
+
+Iterates `system.tables` for the target database, writes per-table DDL (`SHOW CREATE TABLE` → `<db>/<table>.sql`) and data (`SELECT * FROM <table> FORMAT <fmt>` → `<db>/<table>.<ext>[.gz]`), plus a `manifest.json` at the root. Data is streamed via `SQLClient.Stream` (no in-memory buffering), so multi-GB tables don't OOM chx.
+
+Caveat: this is a **logical** export, not a point-in-time consistent snapshot. ClickHouse Cloud does not expose binary backup contents for download; the only path to a Cloud-managed backup is `chx services backups restore` (POST `/services` with `backupId`), which restores into a brand-new service.
+
+Engines whose data is logical (`Distributed`, `View`, `MaterializedView`, `Merge`, `Null`, `Dictionary`) get their DDL exported but their data skipped — re-importing them duplicates upstream data they don't own.
 
 ### overview — both surfaces in parallel
 
@@ -335,7 +352,8 @@ internal/commands/
   users.go / clusters.go                 # Access + topology
   services.go                            # Surface B: services list/get/start/stop/awake
   allowlist.go                           # services allowlist add/remove
-  backups.go                             # services backups list
+  backups.go                             # services backups list + restore (POST /services with backupId)
+  dump.go                                # chx dump — logical export (DDL + per-table data via SQLClient.Stream)
   api.go                                 # Generic Cloud API passthrough
   overview.go                            # Parallel snapshot (errgroup, sgx-pattern)
 ```

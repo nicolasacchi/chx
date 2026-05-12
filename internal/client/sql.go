@@ -245,6 +245,121 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
+// Stream sends sql to the server with the given options and copies the
+// (possibly gzip-decoded) response body straight into dst. Unlike Query, it
+// never buffers the full body in memory — suitable for multi-GB exports.
+//
+// Retry policy: only network errors and retryable HTTP statuses (429/5xx) before
+// the response body is touched are retried. Once a 200 OK is received, the body
+// is committed to dst and any mid-stream error surfaces verbatim.
+//
+// Error handling on non-2xx: the (small) error body is fully read and returned
+// as *APIError or *CHException, same as Query.
+//
+// The returned CHSummary is populated from the X-ClickHouse-Summary response
+// header or trailer (ClickHouse may emit it as either depending on transfer-encoding).
+func (c *SQLClient) Stream(ctx context.Context, sql string, opts SQLOptions, dst io.Writer) (CHSummary, error) {
+	if opts.QueryID == "" {
+		opts.QueryID = newQueryID()
+	}
+	if opts.Format == "" {
+		opts.Format = "JSON"
+	}
+	params := c.buildParams(opts)
+	full := c.baseURL + "/?" + params.Encode()
+
+	var lastErr error
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := BackoffDelay(lastErr, attempt)
+			if c.verbose {
+				fmt.Fprintf(VerboseStderr(), "chx: stream retry %d/%d after %s\n", attempt, MaxRetries, delay)
+			}
+			select {
+			case <-ctx.Done():
+				return CHSummary{}, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, full, strings.NewReader(sql))
+		if err != nil {
+			return CHSummary{}, err
+		}
+		req.Header.Set("X-ClickHouse-User", c.user)
+		req.Header.Set("X-ClickHouse-Key", c.password)
+		req.Header.Set("Accept-Encoding", "gzip")
+		req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+
+		if c.verbose {
+			fmt.Fprintf(VerboseStderr(), "chx: POST (stream) %s [query_id=%s]\n", full, opts.QueryID)
+		}
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			if !ShouldRetryNetwork(err) {
+				return CHSummary{}, err
+			}
+			continue
+		}
+
+		// Non-2xx: small error body, read fully (matches Query's error path).
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := readResponseBody(resp)
+			resp.Body.Close()
+			apiErr := &APIError{
+				StatusCode: resp.StatusCode,
+				Method:     http.MethodPost,
+				URL:        full,
+				Body:       string(body),
+			}
+			if ShouldRetryStatus(resp.StatusCode) && attempt < MaxRetries {
+				lastErr = AsRetryable(apiErr, resp.Header)
+				continue
+			}
+			if chx := exceptionFromHeaders(resp.Header, opts.QueryID); chx != nil {
+				chx.Message = string(body)
+				chx.Name = parseExceptionName(chx.Message)
+				return CHSummary{}, chx
+			}
+			return CHSummary{}, apiErr
+		}
+
+		// 2xx — committed to streaming. No retry from here.
+		r := io.Reader(resp.Body)
+		var gz *gzip.Reader
+		if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+			gz, err = gzip.NewReader(resp.Body)
+			if err != nil {
+				resp.Body.Close()
+				return CHSummary{}, fmt.Errorf("gzip reader: %w", err)
+			}
+			r = gz
+		}
+		_, copyErr := io.Copy(dst, r)
+		if gz != nil {
+			gz.Close()
+		}
+		resp.Body.Close()
+		if copyErr != nil {
+			return CHSummary{}, fmt.Errorf("stream copy: %w", copyErr)
+		}
+
+		// Summary may arrive as a header or a trailer depending on transfer-encoding.
+		summaryHeader := resp.Header.Get("X-ClickHouse-Summary")
+		if summaryHeader == "" && resp.Trailer != nil {
+			summaryHeader = resp.Trailer.Get("X-ClickHouse-Summary")
+		}
+		if c.verbose {
+			fmt.Fprintf(VerboseStderr(), "chx: -> %d (streamed)\n", resp.StatusCode)
+		}
+		return parseSummary(summaryHeader), nil
+	}
+
+	return CHSummary{}, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
 // buildParams composes the URL params per the always-on setting list.
 func (c *SQLClient) buildParams(opts SQLOptions) url.Values {
 	v := url.Values{}
