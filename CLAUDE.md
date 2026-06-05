@@ -290,7 +290,11 @@ For DDL/DML: use a separate `chx_admin` profile with appropriate grants, then `c
 | 0 | Success |
 | 1 | Generic API/network error |
 | 2 | Auth error (401/403, ClickHouse `ACCESS_DENIED`/`AUTHENTICATION_FAILED`) |
+| 3 | Validation (400) |
 | 4 | Not found (404, ClickHouse `UNKNOWN_TABLE`/`UNKNOWN_DATABASE`) |
+| 5 | Rate limited (429) |
+
+HTTP exit codes use the fleet-canonical table (`clicore/cierrors.ExitCodeFor`); `CHException` keeps its ClickHouse error-code mapping (also 2/4/1).
 
 ## HTTP Client
 
