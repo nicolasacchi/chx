@@ -183,7 +183,9 @@ func (c *CloudClient) Do(ctx context.Context, method, path string, body any) ([]
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			if !ShouldRetryNetwork(err) {
+			// Cloud Mgmt API: pass the real method — POST/PATCH mutations are
+			// not retried on a network failure; GET/DELETE are.
+			if !ShouldRetryNetwork(method, err) {
 				return nil, err
 			}
 			continue

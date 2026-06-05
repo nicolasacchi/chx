@@ -180,7 +180,10 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			if !ShouldRetryNetwork(err) {
+			// SQL queries are reads transported as POST, so they're idempotent —
+			// pass GET-semantics to keep transient-network retry while still
+			// skipping permanent errors.
+			if !ShouldRetryNetwork(http.MethodGet, err) {
 				return nil, err
 			}
 			continue
@@ -298,7 +301,8 @@ func (c *SQLClient) Stream(ctx context.Context, sql string, opts SQLOptions, dst
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			if !ShouldRetryNetwork(err) {
+			// Streaming read (POST-transported, idempotent) — GET-semantics.
+			if !ShouldRetryNetwork(http.MethodGet, err) {
 				return CHSummary{}, err
 			}
 			continue

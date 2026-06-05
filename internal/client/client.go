@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/nicolasacchi/clicore/httpclient"
 )
 
 const (
@@ -40,10 +42,13 @@ func ShouldRetryStatus(code int) bool {
 	return code == 429 || (code >= 500 && code < 600)
 }
 
-// ShouldRetryNetwork returns true for any non-nil network error (caller
-// already filtered context.Canceled / DeadlineExceeded if relevant).
-func ShouldRetryNetwork(err error) bool {
-	return err != nil
+// ShouldRetryNetwork delegates to clicore's canonical policy: retry only an
+// idempotent method on a transient (non-permanent) network error — never a
+// permanent error (TLS/x509, DNS NXDOMAIN, ctx cancel; fixes SEC-6) and never a
+// non-idempotent write. ClickHouse reads are POST-transported but idempotent,
+// so the SQL path passes http.MethodGet; the Cloud path passes its real method.
+func ShouldRetryNetwork(method string, err error) bool {
+	return httpclient.ShouldRetryNetwork(method, err)
 }
 
 // ParseRetryAfter reads a Retry-After response header value as a delta-seconds int.
