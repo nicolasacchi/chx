@@ -2,7 +2,11 @@
 // and cloud.go (ClickHouse Cloud Management API).
 package client
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/nicolasacchi/clicore/cierrors"
+)
 
 // APIError is an HTTP-level error: non-2xx status from either surface.
 type APIError struct {
@@ -19,15 +23,11 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s %s: %d", e.Method, e.URL, e.StatusCode)
 }
 
+// ExitCode delegates to the fleet-canonical table (auth=2, validation=3,
+// not_found=4, rate_limited=5, else 1). CHException keeps its own ClickHouse
+// error-code mapping (also 2/4/1).
 func (e *APIError) ExitCode() int {
-	switch e.StatusCode {
-	case 401, 403:
-		return 2
-	case 404:
-		return 4
-	default:
-		return 1
-	}
+	return cierrors.ExitCodeFor(e.StatusCode, "")
 }
 
 // CHException is a ClickHouse-level error: HTTP 200 but the SQL endpoint
