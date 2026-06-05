@@ -31,20 +31,20 @@ var (
 	cloudOrgIDFlag     string
 	databaseFlag       string
 
-	formatFlag   string
-	jsonFlag     bool
-	ndjsonFlag   bool
-	jqFlag       string
-	timingFlag   bool
+	formatFlag string
+	jsonFlag   bool
+	ndjsonFlag bool
+	jqFlag     string
+	timingFlag bool
 
-	limitFlag     int
-	timeoutFlag   string
-	yesFlag       bool
-	writeFlag     bool
-	allUsersFlag  bool
-	clusterFlag   string
-	verboseFlag   bool
-	protocolFlag  string
+	limitFlag    int
+	timeoutFlag  string
+	yesFlag      bool
+	writeFlag    bool
+	allUsersFlag bool
+	clusterFlag  string
+	verboseFlag  bool
+	protocolFlag string
 )
 
 var rootCmd = &cobra.Command{

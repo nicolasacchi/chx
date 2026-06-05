@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	partsListActive  bool
-	partsListTopN    int
-	partsListBy      string
-	partsListDB      string
+	partsListActive bool
+	partsListTopN   int
+	partsListBy     string
+	partsListDB     string
 )
 
 var partsCmd = &cobra.Command{

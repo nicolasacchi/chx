@@ -105,7 +105,7 @@ func isTTY(w io.Writer) bool {
 type buffer struct{ buf []byte }
 
 func (b *buffer) Write(p []byte) (int, error) { b.buf = append(b.buf, p...); return len(p), nil }
-func (b *buffer) String() string               { return string(b.buf) }
+func (b *buffer) String() string              { return string(b.buf) }
 
 func jsonIndent(dst *buffer, src []byte) error {
 	var v any
