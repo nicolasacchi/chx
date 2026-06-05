@@ -65,7 +65,7 @@ Profiles can configure either surface, both, or one — `chx config doctor` repo
 | `--ndjson` | false | Shortcut for `--format JSONEachRow` (mutually exclusive with `--jq` / `--format`) |
 | `--jq <expr>` | — | gjson filter (NOT real jq) — whole-buffer over JSON `data` |
 | `--timing` | false | Print `X-ClickHouse-Summary` footer to stderr |
-| `--limit N` | 1000 | Server-side cap via `max_result_rows` (0 disables) |
+| `--limit N` | 1000 (100 under `CLAUDECODE`) | Server-side cap via `max_result_rows` (0 disables). Agents (`CLAUDECODE=1`) default to 100 so an unbounded `SELECT` doesn't flood context; pass `--limit` explicitly (incl. `--limit 0`) to override. |
 | `--timeout <dur>` | 60s | HTTP timeout (Cloud cold-boot tolerance) |
 | `--yes` | false | Confirm destructive operations |
 | `--write` | false | Strip `readonly=2` + `max_result_rows` URL params (server-side grants still enforce). Requires `--yes` for typed write commands. |
@@ -301,7 +301,7 @@ HTTP exit codes use the fleet-canonical table (`clicore/cierrors.ExitCodeFor`); 
 | Setting | SQL endpoint | Cloud Mgmt API |
 |---------|--------------|----------------|
 | Timeout | 60s (default) | 60s |
-| Retries | 3 on 429 + 5xx + network | same |
+| Retries | 3 on 429 + 5xx + network (reads); writes retry **429 only** | same |
 | Backoff | Exponential 1s/2s/4s + 0–500 ms jitter, honors `Retry-After` | same |
 | Rate limit | none | token bucket: 1 token/sec, burst 10 (matches 10 req/10s quota) |
 | Compression | `Accept-Encoding: gzip` + `enable_http_compression=1` URL param | none |
