@@ -126,10 +126,10 @@ func TestExceptionFromBody_NonJSONFormatIgnored(t *testing.T) {
 
 func TestParseExceptionCode(t *testing.T) {
 	cases := map[string]int{
-		"Code: 60. DB::Exception: Foo":               60,
-		"Code: 497. ACCESS_DENIED":                   497,
-		"no code here":                               0,
-		"Code: NaN. wrong":                           0,
+		"Code: 60. DB::Exception: Foo": 60,
+		"Code: 497. ACCESS_DENIED":     497,
+		"no code here":                 0,
+		"Code: NaN. wrong":             0,
 	}
 	for in, want := range cases {
 		if got := parseExceptionCode(in); got != want {

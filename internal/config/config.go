@@ -83,8 +83,8 @@ type Profile struct {
 	// Surface B — Cloud Mgmt API
 	CloudOrganizationID string `toml:"cloud_organization_id"`
 	CloudKeyID          string `toml:"cloud_key_id"`
-	CloudKeySecret     string `toml:"cloud_key_secret"`
-	CloudKeySecretEnv  string `toml:"cloud_key_secret_env"` // alt: read secret from a named env var
+	CloudKeySecret      string `toml:"cloud_key_secret"`
+	CloudKeySecretEnv   string `toml:"cloud_key_secret_env"` // alt: read secret from a named env var
 
 	// Defaults
 	Readonly bool `toml:"readonly"`

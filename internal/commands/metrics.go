@@ -51,7 +51,7 @@ ORDER BY name
 }
 
 var (
-	eventsTopSince string
+	eventsTopSince  string
 	eventsTopFilter string
 )
 

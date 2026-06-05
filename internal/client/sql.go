@@ -73,24 +73,24 @@ type SQLOptions struct {
 
 // SQLResult holds the parsed response of a successful SQL request.
 type SQLResult struct {
-	Body    []byte     // raw response body (decompressed if gzipped)
-	Summary CHSummary  // parsed from X-ClickHouse-Summary header (zero value if absent)
-	QueryID string     // X-ClickHouse-Query-Id (server may echo back the one we sent)
-	Format  string     // X-ClickHouse-Format (server-confirmed format)
+	Body    []byte    // raw response body (decompressed if gzipped)
+	Summary CHSummary // parsed from X-ClickHouse-Summary header (zero value if absent)
+	QueryID string    // X-ClickHouse-Query-Id (server may echo back the one we sent)
+	Format  string    // X-ClickHouse-Format (server-confirmed format)
 }
 
 // CHSummary parses the X-ClickHouse-Summary response header.
 // All fields come over the wire as JSON-encoded strings; we coerce on parse.
 type CHSummary struct {
-	ReadRows         int64 `json:"read_rows,string"`
-	ReadBytes        int64 `json:"read_bytes,string"`
-	WrittenRows      int64 `json:"written_rows,string"`
-	WrittenBytes     int64 `json:"written_bytes,string"`
-	TotalRowsToRead  int64 `json:"total_rows_to_read,string"`
-	ResultRows       int64 `json:"result_rows,string"`
-	ResultBytes      int64 `json:"result_bytes,string"`
-	ElapsedNS        int64 `json:"elapsed_ns,string"`
-	MemoryUsage      int64 `json:"memory_usage,string"`
+	ReadRows        int64 `json:"read_rows,string"`
+	ReadBytes       int64 `json:"read_bytes,string"`
+	WrittenRows     int64 `json:"written_rows,string"`
+	WrittenBytes    int64 `json:"written_bytes,string"`
+	TotalRowsToRead int64 `json:"total_rows_to_read,string"`
+	ResultRows      int64 `json:"result_rows,string"`
+	ResultBytes     int64 `json:"result_bytes,string"`
+	ElapsedNS       int64 `json:"elapsed_ns,string"`
+	MemoryUsage     int64 `json:"memory_usage,string"`
 }
 
 // Format renders the summary as a single line for stderr printing under --timing.
