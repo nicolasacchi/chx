@@ -149,6 +149,7 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 	}
 	params := c.buildParams(opts)
 	full := c.baseURL + "/?" + params.Encode()
+	retryMethod := retryMethodFor(opts.Write)
 
 	var lastErr error
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
@@ -180,10 +181,11 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			// SQL queries are reads transported as POST, so they're idempotent —
-			// pass GET-semantics to keep transient-network retry while still
-			// skipping permanent errors.
-			if !ShouldRetryNetwork(http.MethodGet, err) {
+			// Read queries are POST-transported but idempotent (retryMethod=GET);
+			// a --write request is non-idempotent (retryMethod=POST) so clicore's
+			// policy refuses the network retry — a dropped connection may have
+			// already applied the mutation server-side.
+			if !ShouldRetryNetwork(retryMethod, err) {
 				return nil, err
 			}
 			continue
@@ -207,8 +209,9 @@ func (c *SQLClient) Query(ctx context.Context, sql string, opts SQLOptions) (*SQ
 				URL:        full,
 				Body:       string(body),
 			}
-			// 5xx + 429 → retry; 4xx → terminal
-			if ShouldRetryStatus(resp.StatusCode) && attempt < MaxRetries {
+			// 429 always retryable; 5xx retryable for reads only (ambiguous after
+			// a write — it may have committed). 4xx → terminal.
+			if shouldRetrySQLStatus(resp.StatusCode, opts.Write) && attempt < MaxRetries {
 				lastErr = AsRetryable(apiErr, resp.Header)
 				continue
 			}
@@ -270,6 +273,7 @@ func (c *SQLClient) Stream(ctx context.Context, sql string, opts SQLOptions, dst
 	}
 	params := c.buildParams(opts)
 	full := c.baseURL + "/?" + params.Encode()
+	retryMethod := retryMethodFor(opts.Write)
 
 	var lastErr error
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
@@ -301,8 +305,9 @@ func (c *SQLClient) Stream(ctx context.Context, sql string, opts SQLOptions, dst
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
-			// Streaming read (POST-transported, idempotent) — GET-semantics.
-			if !ShouldRetryNetwork(http.MethodGet, err) {
+			// Read stream is POST-transported but idempotent (retryMethod=GET);
+			// a --write stream is non-idempotent (retryMethod=POST) and won't retry.
+			if !ShouldRetryNetwork(retryMethod, err) {
 				return CHSummary{}, err
 			}
 			continue
@@ -318,7 +323,7 @@ func (c *SQLClient) Stream(ctx context.Context, sql string, opts SQLOptions, dst
 				URL:        full,
 				Body:       string(body),
 			}
-			if ShouldRetryStatus(resp.StatusCode) && attempt < MaxRetries {
+			if shouldRetrySQLStatus(resp.StatusCode, opts.Write) && attempt < MaxRetries {
 				lastErr = AsRetryable(apiErr, resp.Header)
 				continue
 			}

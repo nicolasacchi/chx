@@ -9,6 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cliout "github.com/nicolasacchi/clicore/output"
+
 	"github.com/nicolasacchi/chx/internal/client"
 	"github.com/nicolasacchi/chx/internal/config"
 )
@@ -58,6 +60,17 @@ var rootCmd = &cobra.Command{
 // SetVersion is called by main.go before Execute.
 func SetVersion(v string) { rootCmd.Version = v }
 
+// defaultRowLimit picks the --limit default. Humans get 1000 (chx's historical
+// safety cap); agents (CLAUDECODE=1) get the fleet AgentRowCap (100) so an
+// unbounded SELECT doesn't flood the model's context. An explicit --limit
+// (including --limit 0 for "all") always overrides, in either environment.
+func defaultRowLimit() int {
+	if cliout.AgentMode() {
+		return cliout.AgentRowCap
+	}
+	return 1000
+}
+
 // Execute runs the root command.
 func Execute() error { return rootCmd.Execute() }
 
@@ -86,7 +99,7 @@ func init() {
 	pf.BoolVar(&timingFlag, "timing", false, "Print X-ClickHouse-Summary footer to stderr (off by default)")
 
 	// Behavior
-	pf.IntVar(&limitFlag, "limit", 1000, "Server-side cap via max_result_rows (0 disables)")
+	pf.IntVar(&limitFlag, "limit", defaultRowLimit(), "Server-side cap via max_result_rows (0 disables)")
 	pf.StringVar(&timeoutFlag, "timeout", "60s", "HTTP timeout (e.g. 60s, 2m). Default 60s for Cloud cold-boot.")
 	pf.BoolVar(&yesFlag, "yes", false, "Confirm destructive operations")
 	pf.BoolVar(&writeFlag, "write", false, "Strip readonly=2 + max_result_rows URL params (server-side grants still enforce). Requires --yes for typed write commands.")

@@ -42,6 +42,31 @@ func ShouldRetryStatus(code int) bool {
 	return code == 429 || (code >= 500 && code < 600)
 }
 
+// shouldRetrySQLStatus is the write-aware variant used by the SQL path. A 429 is
+// rejected before execution, so it's always retryable. A 5xx after a --write is
+// ambiguous (the DDL/DML may have committed), so it is surfaced rather than
+// re-sent; reads keep the canonical 5xx retry.
+func shouldRetrySQLStatus(code int, write bool) bool {
+	if code == 429 {
+		return true
+	}
+	if write {
+		return false
+	}
+	return ShouldRetryStatus(code)
+}
+
+// retryMethodFor maps a SQL request's write-ness to the HTTP method clicore's
+// retry policy should reason about. Reads are POST-on-the-wire but idempotent,
+// so they advertise GET (retry transient network errors); writes advertise their
+// real POST so a non-idempotent mutation is never blindly re-sent.
+func retryMethodFor(write bool) string {
+	if write {
+		return http.MethodPost
+	}
+	return http.MethodGet
+}
+
 // ShouldRetryNetwork delegates to clicore's canonical policy: retry only an
 // idempotent method on a transient (non-permanent) network error — never a
 // permanent error (TLS/x509, DNS NXDOMAIN, ctx cancel; fixes SEC-6) and never a
