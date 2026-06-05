@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+	cliconfig "github.com/nicolasacchi/clicore/config"
 )
 
 // Env var names (CLI-flag > env > config-file precedence; each field independent).
@@ -242,16 +243,9 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := toml.NewEncoder(f)
-	return enc.Encode(cfg)
+	// Atomic temp+rename (clicore) — replaces the prior O_TRUNC write so an
+	// interrupted encode can't corrupt a config that already holds credentials.
+	return cliconfig.SaveTOML(path, cfg)
 }
 
 // Path returns the config file path: $XDG_CONFIG_HOME/chx/config.toml or ~/.config/chx/config.toml.
